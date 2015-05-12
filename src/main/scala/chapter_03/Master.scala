@@ -12,11 +12,11 @@ trait Logger {
 
 }
 
-object MasterAsync {
+object Master {
 
 
   def main(args: Array[String]): Unit = {
-    val m = new MasterAsync(args(0))
+    val m = new Master(args(0))
     m.startZk()
     m.runForMaster()
     Thread.sleep(60000)
@@ -25,7 +25,7 @@ object MasterAsync {
   }
 }
 
-class MasterAsync(hostPort: String) extends Watcher with Logger {
+class Master(hostPort: String) extends Watcher with Logger {
 
   var isLeader = false
 
