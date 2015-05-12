@@ -2,7 +2,7 @@
 package chapter_03
 
 
-import org.apache.zookeeper.KeeperException.{NoNodeException, NodeExistsException}
+import org.apache.zookeeper.KeeperException.{ConnectionLossException, NoNodeException, NodeExistsException}
 import org.apache.zookeeper._
 import org.apache.zookeeper.data.Stat
 
@@ -49,13 +49,14 @@ class Master(hostPort: String) extends Watcher {
   }
 
   def checkForMaster(): Boolean = {
+    println("checkForMaster")
     while (true) {
       try {
         val stat = new Stat
         val data = zk.getData(Master, false, stat)
-        new String(data).equals(serverId) //this doesn't need a return keyword.
+        return new String(data).equals(serverId) //this doesn't need a return keyword.
       } catch {
-        case e: NoNodeException => false
+        case e: NoNodeException => return false
       }
     }
     false
@@ -70,23 +71,21 @@ class Master(hostPort: String) extends Watcher {
 
 
   def runForMaster(): Boolean = {
+
     while (true) {
       try {
         zk.create(Master, serverId, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL)
         return true
       } catch {
-        case e: NodeExistsException => {
+        case e: NodeExistsException =>
           println(s"xxx NodeExistsException $e")
           return false
-        }
-        case e: InterruptedException => {
-
-          println(s"xxx InterruptedException $e")
+        case e: ConnectionLossException => {
+          if (checkForMaster()) return true
         }
       }
     }
-
-    checkForMaster()
+    false
 
   }
 
