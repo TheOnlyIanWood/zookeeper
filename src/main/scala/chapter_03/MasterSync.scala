@@ -15,10 +15,10 @@ import scala.util.Random
 127.0.0.1:2181
  *
  */
-object Master {
+object MasterSync {
 
   def main(args: Array[String]): Unit = {
-    val m = new Master(args(0))
+    val m = new MasterSync(args(0))
     m.startZk()
 
     if (m.runForMaster()) {
@@ -36,7 +36,7 @@ object Master {
 /**
  * Created by ian on 11/05/15.
  */
-class Master(hostPort: String) extends Watcher {
+class MasterSync(hostPort: String) extends Watcher {
 
   val Master = "/master"
 
