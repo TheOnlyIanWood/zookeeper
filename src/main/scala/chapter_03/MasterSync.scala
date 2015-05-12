@@ -36,17 +36,9 @@ object MasterSync {
 /**
  * Created by ian on 11/05/15.
  */
-class MasterSync(hostPort: String) extends Watcher {
+class MasterSync(hostPort: String) extends DefaultWatcher(hostPort) {
 
   val Master = "/master"
-
-  val serverId = Integer.toHexString(new Random().nextInt()).getBytes()
-
-  private lazy val zk: ZooKeeper = new ZooKeeper(hostPort, 15000, this)
-
-  def startZk(): Unit = {
-    println(s"startZk [$zk]")
-  }
 
   def checkForMaster(): Boolean = {
     println("checkForMaster")
@@ -54,7 +46,7 @@ class MasterSync(hostPort: String) extends Watcher {
       try {
         val stat = new Stat
         val data = zk.getData(Master, false, stat)
-        return new String(data).equals(serverId) //this doesn't need a return keyword.
+        return new String(data).equals(serverId)
       } catch {
         case e: NoNodeException => return false
       }
@@ -74,7 +66,7 @@ class MasterSync(hostPort: String) extends Watcher {
 
     while (true) {
       try {
-        zk.create(Master, serverId, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL)
+        zk.create(Master, serverId.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL)
         return true
       } catch {
         case e: NodeExistsException =>

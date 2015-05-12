@@ -14,6 +14,7 @@ trait Logger {
 
 object Master {
 
+  val Master = "/master"
 
   def main(args: Array[String]): Unit = {
     val m = new Master(args(0))
@@ -25,19 +26,10 @@ object Master {
   }
 }
 
-class Master(hostPort: String) extends Watcher with Logger {
+class Master(hostPort: String) extends DefaultWatcher(hostPort) with Logger {
 
   var isLeader = false
 
-  val Master = "/master"
-
-  val serverId = Integer.toHexString(new Random().nextInt()).getBytes()
-
-  private lazy val zk: ZooKeeper = new ZooKeeper(hostPort, 15000, this)
-
-  def startZk(): Unit = {
-    log.info(s"startZk [$zk]")
-  }
 
   def masterCreateCallBack = new StringCallback {
     override def processResult(rc: Int, path: String, ctx: scala.Any, name: String): Unit = {
@@ -55,12 +47,12 @@ class Master(hostPort: String) extends Watcher with Logger {
 
   def checkMaster(): Unit = {
     println("checkForMaster")
-    zk.getData(Master, false, masterCheckCallback, null)
+    zk.getData(Master.Master, false, masterCheckCallback, null)
 
   }
 
   def runForMaster() = {
-    zk.create(Master, serverId, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL, masterCreateCallBack, null)
+    zk.create(Master.Master, serverId.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL, masterCreateCallBack, null)
   }
 
   def masterCheckCallback = new DataCallback {
@@ -94,6 +86,7 @@ class Master(hostPort: String) extends Watcher with Logger {
         case Code.CONNECTIONLOSS => createParent(path, ctx.asInstanceOf[Array[Byte]])
         case Code.OK => log.info(s"Parent created [$path].")
         case Code.NODEEXISTS => log.warn(s"Parent already exists [$path].")
+        case _ => log.error(s"Something went wrong: ${KeeperException.create(Code.get(rc), path)}")
       }
     }
   }
