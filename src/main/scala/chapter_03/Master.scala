@@ -1,3 +1,4 @@
+
 package chapter_03
 
 
@@ -24,10 +25,8 @@ object Master {
       println("I am the leader")
       Thread.sleep(60000)
     } else {
-      println("someone else is the leader")
+      println("Someone else is the leader")
     }
-
-
 
     m.stopZk()
   }
@@ -39,22 +38,22 @@ object Master {
  */
 class Master(hostPort: String) extends Watcher {
 
-  //  var isLeader = false
-  val r = new Random()
-  val serverId = Integer.toHexString(r.nextInt()).getBytes()
+  val Master = "/master"
 
-  var zk: ZooKeeper = null
+  val serverId = Integer.toHexString(new Random().nextInt()).getBytes()
+
+  private lazy val zk: ZooKeeper = new ZooKeeper(hostPort, 15000, this)
 
   def startZk(): Unit = {
-    zk = new ZooKeeper(hostPort, 15000, this)
+    println(s"startZk [$zk]")
   }
 
   def checkForMaster(): Boolean = {
     while (true) {
       try {
         val stat = new Stat
-        val data = zk.getData("/master", false, stat)
-        new String(data).equals(serverId)
+        val data = zk.getData(Master, false, stat)
+        new String(data).equals(serverId) //this doesn't need a return keyword.
       } catch {
         case e: NoNodeException => false
       }
@@ -62,12 +61,18 @@ class Master(hostPort: String) extends Watcher {
     false
   }
 
+  //TODO try to simulate task/worker pattern
+  //1) Worker
+  //2) ServiceWantingWorkDone
+  //3) WorkerController
+  //4) Tasks
+  //5) TaskResults
+
+
   def runForMaster(): Boolean = {
-    var continue = true
-    while (continue) {
+    while (true) {
       try {
-        zk.create("/master", serverId, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL)
-        continue = false
+        zk.create(Master, serverId, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL)
         return true
       } catch {
         case e: NodeExistsException => {
