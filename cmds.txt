@@ -1,0 +1,8 @@
+/opt/zookeeper/zookeeper-3.4.6/bin/zkServer.sh start ./z1.cfg
+/opt/zookeeper/zookeeper-3.4.6/bin/zkServer.sh start ./z2.cfg  
+
+#to look at logs
+tail -F -n 100 zookeeper.out
+
+#to start the client
+/opt/zookeeper/zookeeper-3.4.6/bin/zkCli.sh -server 127.0.0.1:2181,127.0.0.1:2182,127.0.0.1:2183
