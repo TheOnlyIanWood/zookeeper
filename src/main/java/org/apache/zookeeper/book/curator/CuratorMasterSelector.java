@@ -58,6 +58,8 @@ import java.util.concurrent.CountDownLatch;
 
 //import org.apache.zookeeper.Watcher;
 
+//NOTE CuratorMaster and CuratorMasterSelector are more or less the same and use more CountDownLatches.
+
 public class CuratorMasterSelector implements Closeable, LeaderSelectorListener{
     private static final Logger LOG = LoggerFactory.getLogger(CuratorMasterSelector.class);
     
@@ -449,6 +451,9 @@ public class CuratorMasterSelector implements Closeable, LeaderSelectorListener{
             master.startZK();
             master.bootstrap();
             master.runForMaster();
+
+            Thread.sleep(Long.MAX_VALUE);
+
         } catch (Exception e) {
             LOG.error("Exception while running curator master.", e);
         }

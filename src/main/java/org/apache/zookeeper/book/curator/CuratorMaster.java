@@ -1,3 +1,4 @@
+
 /**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -16,6 +17,8 @@
  * limitations under the License.
  */
 
+
+//NOTE CuratorMaster and CuratorMasterSelector are more or less the same and use more CountDownLatches.
 
 package org.apache.zookeeper.book.curator;
 
@@ -448,6 +451,11 @@ public class CuratorMaster implements Closeable, LeaderSelectorListener {
             master.startZK();
             master.bootstrap();
             master.runForMaster();
+
+
+            Thread.sleep(Long.MAX_VALUE);
+
+
         } catch (Exception e) {
             LOG.error("Exception while running curator master.", e);
         }

@@ -123,6 +123,7 @@ public class CuratorMasterLatch implements Closeable, LeaderLatchListener {
      * @throws InterruptedException
      */
     public void awaitLeadership()
+
     throws InterruptedException, EOFException {
         leaderLatch.await();
     }
@@ -408,6 +409,9 @@ public class CuratorMasterLatch implements Closeable, LeaderLatchListener {
             master.startZK();
             master.bootstrap();
             master.runForMaster();
+
+            Thread.sleep(Long.MAX_VALUE);
+
         } catch (Exception e) {
             LOG.error("Exception while running curator master.", e);
         }
