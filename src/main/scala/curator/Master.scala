@@ -338,6 +338,8 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
     val taskPath = s"$Tasks/task-$number"
     log.info(s"Deleting task [$number] path [$taskPath].")
     client.delete.inBackground.forPath(taskPath)
+
+    //NOT really sure why we need this - just copied from the example.
     recoveryLatch.countDown
   }
 
