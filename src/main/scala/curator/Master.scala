@@ -234,11 +234,15 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
 
   def assignTask(task: String, data: Array[Byte], callback: BackgroundCallback) = {
     val workersList = workersCache.getCurrentData
-    val designatedWorker = workersList.get(rand.nextInt(workersList.size)).getPath.replaceFirst(Workers + "/", "")
+    if(!workersList.isEmpty) {
+      val designatedWorker = workersList.get(rand.nextInt(workersList.size)).getPath.replaceFirst(Workers + "/", "")
 
-    val path = s"$Assign/$designatedWorker/$task"
-    log.info(s"Assigning task [$task], [${new String(data)}] to worker [$designatedWorker] to path [$path]")
-    createAssignment(path, data,callback)
+      val path = s"$Assign/$designatedWorker/$task"
+      log.info(s"Assigning task [$task], [${new String(data)}] to worker [$designatedWorker] to path [$path]")
+      createAssignment(path, data, callback)
+    }else{
+      log.warn(s"There are no worker to assign [${task}].")
+    }
   }
 
   def createAssignment(path: String, data: Array[Byte], callback: BackgroundCallback) = {
@@ -383,6 +387,7 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
 
   private def deletePath(path: String): Unit = {
     log.info(s"Deleting [$path].")
+//    client.delete.inBackground.forPath(path)
     client.delete.inBackground.forPath(path)
   }
 
@@ -399,7 +404,11 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
           } catch {
             case e: Exception => log.error("Exception while trying to re-assign tasks", e)
           }
-        case PathChildrenCacheEvent.Type.CHILD_ADDED =>
+        case PathChildrenCacheEvent.Type.CHILD_ADDED =>{
+          val tasks = client.getChildren.forPath(Tasks).asScala.toList
+          log.info(s"New worker added [${path}] will assign [${tasks.size}] to him.")
+          assignTasks(tasks, initialTaskAssignmentCallback)
+        }
         case PathChildrenCacheEvent.Type.CHILD_UPDATED =>
         case _ => // TODO perhaps handle this.
       }

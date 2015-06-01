@@ -11,9 +11,13 @@ import org.apache.curator.retry.ExponentialBackoffRetry
 import rx.lang.scala._
 
 import scala.collection.JavaConverters._
+import scala.concurrent.Future
 import scala.swing._
 import scala.swing.event._
+import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
+import scala.concurrent.ExecutionContext.Implicits.global
+
 
 /**
  * Created by ian on 28/05/15.
@@ -146,50 +150,74 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
 
 
     deleteAssignmentsButtonClicks.subscribe { _ =>
-      deleteAssignments()
+      log.info(s"deleteAssignments BEFORE XXXX")
+      val future = deleteAssignments()
+      future.onComplete {
+        case Success(s) => log.info(s"Delete worked [$s]")
+        case Failure(f) => log.warn("Delete failed", f)
+      }
+      log.info(s"deleteAssignments END XXXX")
     }
 
 
-    def deleteAssignments() = {
+    def deleteAssignments(): Future[Unit] = {
 
-      val transaction = client.inTransaction();
+      log.info(s"deleteAssignments before Future")
+      Future {
+        try {
+          val transaction = client.inTransaction()
 
-      log.info(s"deleteAssignments")
+          log.info(s"deleteAssignments in Future")
 
-      val workers = client.getChildren.forPath(Assign).asScala
-      log.info(s"workers [${workers}]")
+          val workers = client.getChildren.forPath(Assign).asScala
+          log.info(s"workers [${workers}]")
 
-      for {
-        worker <- workers
-        path = s"$Assign/$worker"
-      } {
-        deleteChildren(path)
-        log.info(s"deleting worker [$path]")
-        delete(path, transaction)
-      }
+          for {
+            worker <- workers
+            path = s"$Assign/$worker"
+          } {
+            deleteChildren(path)
+            log.info(s"deleting worker [$path]")
+            if (path == "/assign/worker-5") {
+              throw new Exception("Hopefully fail transaction")
+            }
+            delete(path, transaction)
+          }
 
-      def deleteChildren(worker: String) = {
-        log.info(s"deleteChildren for  worker [${worker}]")
-        for {
-          task <- client.getChildren.forPath(worker).asScala
-        } {
-          val taskPath = s"$worker/$task"
-          log.info(s"deleting task [$taskPath]")
-          delete(taskPath, transaction)
+          def deleteChildren(worker: String) = {
+            log.info(s"deleteChildren for  worker [${worker}]")
+            for {
+              task <- client.getChildren.forPath(worker).asScala
+            } {
+              val taskPath = s"$worker/$task"
+              log.info(s"deleting task [$taskPath]")
+              delete(taskPath, transaction)
+            }
+          }
+
+          /**
+           * These results are in the same order as added.
+           */
+          val results = transaction.asInstanceOf[CuratorTransactionFinal].commit()
+
+          for (result <- results.asScala) {
+            log.info(s"result [${result.getForPath}] [${result.getType}]")
+          }
+        } catch {
+          // NOTE there is no rollback method
+          case NonFatal(e) => log.error("Problem deleting assignments.", e)
         }
+        log.info(s"deleteAssignments END in Future")
       }
 
-      val results = transaction.asInstanceOf[CuratorTransactionFinal].commit()
-      for (result <- results.asScala) {
-        log.info(s"result [${result.getForPath}] [${result.getType}]")
-      }
 
     }
 
     //TODO this is copied from Master, try to add to trait and mix in.
-    def delete(path: String, transaction: CuratorTransaction): Unit = {
+    def delete(path: String, transaction: CuratorTransaction): CuratorTransactionFinal = {
       transaction.delete.forPath(path).and()
     }
 
   }
 }
+
