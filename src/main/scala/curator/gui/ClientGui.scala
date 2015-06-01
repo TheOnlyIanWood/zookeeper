@@ -51,7 +51,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
     val addWorkerButton = new Button {      text = "Add Worker"    }
     val deleteTasksButton = new Button {      text = "Delete Tasks"    }
     val deleteWorkersButton = new Button {      text = "Delete Workers"    }
-    val deleteAssigmentsButton = new Button {      text = "Delete Assignments"    }
+    val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
 
     contents = new BorderPanel {
 
@@ -62,7 +62,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
         layout(addWorkerButton) = East
         layout(deleteTasksButton) = South
         layout(deleteWorkersButton) = North
-        layout(deleteAssigmentsButton) = Center
+        layout(deleteAssignmentsButton) = Center
       }) = North
     }
 
@@ -91,7 +91,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
     }
 
     val deleteAssigmentsButtonClicks = Observable[Unit] { sub =>
-      deleteAssigmentsButton.reactions += {
+      deleteAssignmentsButton.reactions += {
         case ButtonClicked(_) => sub.onNext(())
       }
     }
@@ -113,9 +113,9 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
     }
 
     private def createPath(comment: String, path: String, number: Int) = {
-      log.info(s"going to make $comment $path")
+      log.info(s"going to make [$comment] [$path]")
       try {
-        client.create.forPath(path, new Array[Byte](number))
+        client.create.forPath(path, number.toString.getBytes)
       } catch {
         case NonFatal(e) => log.info(s"Problem creating [$path]", e)
       }
@@ -148,11 +148,14 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       deleteAssignments()
     }
 
+    def delete(path: String) = client.delete.forPath(path)
+
     def deleteAssignments() = {
       log.info(s"deleteAssignments")
 
       val workers = client.getChildren.forPath(Assign).asScala
       log.info(s"workers [${workers}]")
+
 
       for {
         worker <- workers
@@ -160,7 +163,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       } {
         deleteChildren(path)
         log.info(s"deleting worker [$path]")
-        client.delete.forPath(path)
+        delete(path)
       }
 
       def deleteChildren(worker: String) = {
@@ -170,7 +173,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
         } {
           val taskPath = s"$worker/$task"
           log.info(s"deleting task [$taskPath]")
-          client.delete.forPath(taskPath)
+          delete(taskPath)
         }
       }
 
