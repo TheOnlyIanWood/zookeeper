@@ -90,9 +90,12 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
   private val workersCache = new PathChildrenCache(client, Workers, true)
   private val tasksCache = new PathChildrenCache(client, Tasks, true)
 
-  def doNothing(task: String, data: Array[Byte]) = {}
+  //  def doNothing(task: String, data: Array[Byte]) = {}
+  //  val doNothing = (task: String, data: Array[Byte]) => {}
+  private val doNothing: (String, Array[Byte]) => Unit = (task: String, data: Array[Byte]) => {}
 
-  def createATaskZnode(task: String, data: Array[Byte]): Unit = {
+  //  def createATaskZnode(task: String, data: Array[Byte]): Unit = {
+  private  val createATaskZnode: (String, Array[Byte]) => Unit = (task: String, data: Array[Byte]) => {
     val path = s"$Tasks/$task"
     log.info(s"createATaskZnode for task [${task}] data [$data] path [$path]")
     client.create.forPath(path, data)
