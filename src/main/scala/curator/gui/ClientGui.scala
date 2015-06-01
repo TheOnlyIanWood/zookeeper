@@ -23,45 +23,19 @@ import scala.concurrent.ExecutionContext.Implicits.global
 /**
  * Created by ian on 28/05/15.
  */
-object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
+object ClientGui extends scala.swing.SimpleSwingApplication  {
 
-  import Master._
-
-  private val client = CuratorFrameworkFactory.newClient("127.0.0.1:2181", new ExponentialBackoffRetry(1000, 5))
-
-  client.start()
-
-  private val tasksCache = new PathChildrenCache(client, Tasks, true)
-
-  private val taskNumber = new AtomicInteger(1)
-  private val workerNumber = new AtomicInteger(1)
-
-  val tasksCacheListener = new PathChildrenCacheListener {
-    override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
-
-      val path = event.getData.getPath
-      log.info(s"path [${path}] type [${event.getType}]")
-
-
-    }
-  }
-
-  tasksCache.getListenable.addListener(tasksCacheListener)
-  tasksCache.start
-
-
-  def top = new MainFrame {
+  abstract class GuiFrame extends MainFrame {
     title = "Client Gui"
-    private val AddWorkerText = "Add Worker"
+    val AddWorkerText = "Add Worker"
 
-    private val addTaskButton = new Button {      text = "Add Task"    }
-    private val addWorkerButton = new Button {       text = AddWorkerText    }
-    private val deleteTasksButton = new Button {      text = "Delete Tasks"    }
-    private val deleteWorkersButton = new Button {      text = "Delete Workers"    }
-    private val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
+    val addTaskButton = new Button {       text = "Add Task"    }
+    val addWorkerButton = new Button {      text = AddWorkerText    }
+    val deleteTasksButton = new Button {      text = "Delete Tasks"    }
+    val deleteWorkersButton = new Button {      text = "Delete Workers"    }
+    val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
 
     contents = new BorderPanel {
-
       import BorderPanel.Position._
 
       layout(new BorderPanel {
@@ -72,6 +46,37 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
         layout(deleteAssignmentsButton) = Center
       }) = North
     }
+  }
+
+  trait GuiLogic {
+    self: GuiFrame =>
+
+    import Master._
+
+
+    private val client = CuratorFrameworkFactory.newClient("127.0.0.1:2181", new ExponentialBackoffRetry(1000, 5))
+
+    client.start()
+
+    private val tasksCache = new PathChildrenCache(client, Tasks, true)
+
+    private val taskNumber = new AtomicInteger(1)
+    private val workerNumber = new AtomicInteger(1)
+
+
+    val tasksCacheListener = new PathChildrenCacheListener {
+      override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
+
+        val path = event.getData.getPath
+        log.info(s"path [${path}] type [${event.getType}]")
+
+
+      }
+    }
+
+    tasksCache.getListenable.addListener(tasksCacheListener)
+    tasksCache.start
+
 
     val taskButtonClicks = Observable[Unit] { sub =>
       addTaskButton.reactions += {
@@ -129,9 +134,9 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       }
     }
 
-    deleteTasksButtonClicks.subscribe { _ =>   deleteChildren(Tasks)  }
+    deleteTasksButtonClicks.subscribe { _ => deleteChildren(Tasks) }
 
-    deleteWorkersButtonClicks.subscribe { _ => deleteChildren(Workers)    }
+    deleteWorkersButtonClicks.subscribe { _ => deleteChildren(Workers) }
 
     def deleteChildren(path: String) = {
       log.info(s"deleteChildren path [${path}]")
@@ -142,14 +147,11 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
         log.info(s"Deleting [$childPath]")
         client.delete.forPath(childPath)
       }
-
     }
 
-
     deleteAssignmentsButtonClicks.subscribe { _ =>
-      log.info(s"DeleteAssignments BEFORE XXXX")
-      val future = deleteAssignments()
-      future.onComplete {
+      log.info(s"DeleteAssignment")
+      deleteAssignments().onComplete {
         case Success(results) =>
           for (result <- results) {
             log.info(s"result [${result.getForPath}] [${result.getType}]")
@@ -157,37 +159,36 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
           log.info(s"Deleted [${results.size}] assignments.")
         case Failure(f) => log.warn("Delete failed", f)
       }
-      log.info(s"deleteAssignments END XXXX")
     }
 
     def deleteAssignments(): Future[List[CuratorTransactionResult]] = {
       Future {
-          val transaction = client.inTransaction()
-          val workers = client.getChildren.forPath(Assign).asScala
-          log.info(s"workers [${workers}]")
+        val transaction = client.inTransaction()
+        val workers = client.getChildren.forPath(Assign).asScala
+        log.info(s"workers [${workers}]")
 
+        for {
+          worker <- workers
+          path = s"$Assign/$worker"
+        } {
+          deleteChildren(path)
+          log.info(s"deleting worker [$path]")
+          if (path == "/assign/worker-5") {
+            throw new Exception("Hopefully fail transaction")
+          }
+          delete(path, transaction)
+        }
+
+        def deleteChildren(worker: String) = {
+          log.info(s"deleteChildren for  worker [${worker}]")
           for {
-            worker <- workers
-            path = s"$Assign/$worker"
+            task <- client.getChildren.forPath(worker).asScala
           } {
-            deleteChildren(path)
-            log.info(s"deleting worker [$path]")
-            if (path == "/assign/worker-5") {
-              throw new Exception("Hopefully fail transaction")
-            }
-            delete(path, transaction)
+            val taskPath = s"$worker/$task"
+            log.info(s"deleting task [$taskPath]")
+            delete(taskPath, transaction)
           }
-
-          def deleteChildren(worker: String) = {
-            log.info(s"deleteChildren for  worker [${worker}]")
-            for {
-              task <- client.getChildren.forPath(worker).asScala
-            } {
-              val taskPath = s"$worker/$task"
-              log.info(s"deleting task [$taskPath]")
-              delete(taskPath, transaction)
-            }
-          }
+        }
 
         /**
          * These results are in the same order as added.
@@ -197,11 +198,12 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       }
     }
 
-    //TODO this is copied from Master, try to add to trait and mix in.
     def delete(path: String, transaction: CuratorTransaction): CuratorTransactionFinal = {
       transaction.delete.forPath(path).and()
     }
-
   }
+
+
+  def top = new GuiFrame  with GuiLogic
 }
 
