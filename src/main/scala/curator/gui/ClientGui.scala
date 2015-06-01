@@ -23,19 +23,21 @@ import scala.concurrent.ExecutionContext.Implicits.global
 /**
  * Created by ian on 28/05/15.
  */
-object ClientGui extends scala.swing.SimpleSwingApplication  {
+object ClientGui extends scala.swing.SimpleSwingApplication {
 
   abstract class GuiFrame extends MainFrame {
     title = "Client Gui"
     val AddWorkerText = "Add Worker"
 
-    val addTaskButton = new Button {       text = "Add Task"    }
-    val addWorkerButton = new Button {      text = AddWorkerText    }
+    val addTaskButton = new Button {      text = "Add Task"    }
+    val addWorkerButton = new Button {     text = AddWorkerText    }
     val deleteTasksButton = new Button {      text = "Delete Tasks"    }
     val deleteWorkersButton = new Button {      text = "Delete Workers"    }
     val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
+    val resultsFields = new TextArea
 
     contents = new BorderPanel {
+
       import BorderPanel.Position._
 
       layout(new BorderPanel {
@@ -44,7 +46,9 @@ object ClientGui extends scala.swing.SimpleSwingApplication  {
         layout(deleteTasksButton) = South
         layout(deleteWorkersButton) = North
         layout(deleteAssignmentsButton) = Center
+
       }) = North
+      layout(resultsFields) = Center
     }
   }
 
@@ -155,8 +159,10 @@ object ClientGui extends scala.swing.SimpleSwingApplication  {
         case Success(results) =>
           for (result <- results) {
             log.info(s"result [${result.getForPath}] [${result.getType}]")
+            resultsFields.text = resultsFields.text + "\n" + result.getForPath // TODO do this properly this needs to be on UI thread.
           }
           log.info(s"Deleted [${results.size}] assignments.")
+
         case Failure(f) => log.warn("Delete failed", f)
       }
     }
@@ -204,6 +210,6 @@ object ClientGui extends scala.swing.SimpleSwingApplication  {
   }
 
 
-  def top = new GuiFrame  with GuiLogic
+  def top = new GuiFrame with GuiLogic
 }
 
