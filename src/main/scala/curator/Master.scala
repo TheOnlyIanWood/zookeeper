@@ -90,6 +90,14 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
   private val workersCache = new PathChildrenCache(client, Workers, true)
   private val tasksCache = new PathChildrenCache(client, Tasks, true)
 
+  def doNothing(task: String, data: Array[Byte]) = {}
+
+  def createATaskZnode(task: String, data: Array[Byte]): Unit = {
+    val path = s"$Tasks/$task"
+    log.info(s"createATaskZnode for task [${task}] data [$data] path [$path]")
+    client.create.forPath(path, data)
+  }
+
   /*
   * We use one latch as barrier for the master selection
   * and another one to block the execution of master
@@ -103,7 +111,8 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
   def startZk(): Unit = client.start()
 
   def bootstrap(): Unit = {
-    if(true) { // temporary switch to allow rerunning of the Master
+    if (true) {
+      // temporary switch to allow rerunning of the Master
       client.create.forPath(Workers, new Array[Byte](0))
       client.create.forPath(Assign, new Array[Byte](0))
       client.create.forPath(Tasks, new Array[Byte](0))
@@ -135,7 +144,7 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
       event.getType match {
         case PathChildrenCacheEvent.Type.CHILD_ADDED =>
           try {
-            assignTask(event.getData.getPath.replaceFirst(s"$Tasks/", ""), event.getData.getData,initialTaskAssignmentCallback)
+            assignTask(event.getData.getPath.replaceFirst(s"$Tasks/", ""), event.getData.getData, initialTaskAssignmentCallback, doNothing)
           } catch {
             case e: Exception => log.error("Exception when assigning task.", e) // THIS happens when NOT in background.
           }
@@ -147,7 +156,7 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
     }
   }
 
-  val initialTaskAssignmentCallback = new BackgroundCallback{
+  val initialTaskAssignmentCallback = new BackgroundCallback {
 
     override def processResult(client: CuratorFramework, event: CuratorEvent): Unit = {
       log.info(s"xxx initialTaskAssignmentCallback eventReceived path [${event.getPath}] [${event.getType}]")
@@ -160,7 +169,7 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
     }
   }
 
-  val taskReassignmentCallback = new BackgroundCallback{
+  val taskReassignmentCallback = new BackgroundCallback {
 
     override def processResult(client: CuratorFramework, event: CuratorEvent): Unit = {
       log.info(s"xxx taskReassignmentCallback eventReceived path [${event.getPath}] [${event.getType}]")
@@ -191,7 +200,7 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
           } else {
             log.info("Assigning recovered tasks")
             recoveryLatch = new CountDownLatch(tasks.size)
-            assignTasks(tasks.asScala.toList, initialTaskAssignmentCallback)
+            assignTasks(tasks.asScala.toList, initialTaskAssignmentCallback, doNothing)
           }
 
           //TODO making a new thread is a bit naff
@@ -226,22 +235,24 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
 
   val rand = new Random(System.currentTimeMillis)
 
-  def assignTasks(tasks: List[String],callback: BackgroundCallback) = {
+  def assignTasks(tasks: List[String], callback: BackgroundCallback, noWorkerFun: (String, Array[Byte]) => Unit) = {
     for (task <- tasks) {
-      assignTask(task, client.getData.forPath(s"$Tasks/$task"),callback: BackgroundCallback) //TODO this doesn't work for ressignments.
+      assignTask(task, client.getData.forPath(s"$Tasks/$task"), callback, noWorkerFun)
     }
   }
 
-  def assignTask(task: String, data: Array[Byte], callback: BackgroundCallback) = {
+  def assignTask(task: String, data: Array[Byte], callback: BackgroundCallback, noWorkerFun: (String, Array[Byte]) => Unit) = {
     val workersList = workersCache.getCurrentData
-    if(!workersList.isEmpty) {
+    if (!workersList.isEmpty) {
       val designatedWorker = workersList.get(rand.nextInt(workersList.size)).getPath.replaceFirst(Workers + "/", "")
 
       val path = s"$Assign/$designatedWorker/$task"
       log.info(s"Assigning task [$task], [${new String(data)}] to worker [$designatedWorker] to path [$path]")
       createAssignment(path, data, callback)
-    }else{
-      log.warn(s"There are no worker to assign [${task}].")
+    } else {
+      log.warn(s"There are no workers to assign [${task}].")
+      //TODO it needs to create a /task entry on a reassign when no workers left.
+      noWorkerFun(task,data)
     }
   }
 
@@ -287,19 +298,11 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
 
      */
 
-//    client.create.creatingParentsIfNeeded.forPath(path, data) //TODO see why don't get exception when done in background
+    //    client.create.creatingParentsIfNeeded.forPath(path, data) //TODO see why don't get exception when done in background
 
     // this does throw an exception
     client.create.creatingParentsIfNeeded.withMode(CreateMode.PERSISTENT).inBackground(callback).forPath(path, data)
-
-/* How to do transactions.
-    client.inTransaction.create.withMode(CreateMode.PERSISTENT).forPath(path, data).and.
-      create.withMode(CreateMode.PERSISTENT).forPath(path, data).and.commit()
-
-      */
   }
-
-
 
 
   /*
@@ -319,7 +322,7 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
             val tasks = event.getChildren.asScala.toList
             log.info(s"Successfully got a list of assignments of [${tasks.size}] for [${event.getPath}] tasks [${tasks}}].")
 
-            if(!tasks.isEmpty) {
+            if (!tasks.isEmpty) {
               /*
              We need to get the data first, before deleting so that we can reassign
              */
@@ -344,8 +347,8 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
             */
               for {
                 (task, data) <- taskDatas
-              } assignTask(task, data, taskReassignmentCallback)
-            }else{
+              } assignTask(task, data, taskReassignmentCallback, createATaskZnode)
+            } else {
               log.info(s"No tasks for [${event.getPath}] so nothing to reassign.")
             }
 
@@ -353,13 +356,13 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
             log.warn(s"Unexpected event [${event.getPath}}]")
           }
           case DELETE =>
-              log.info(s"Result of delete operation [${event.getResultCode}] [${event.getPath}]")
-            /*
-             * We delete znodes in two occasions:
-             * 1- When reassigning tasks due to a faulty worker;
-             * 2- Once we have assigned a task, we remove it from
-             *    the list of pending tasks.
-             */
+            log.info(s"Result of delete operation [${event.getResultCode}] [${event.getPath}]")
+          /*
+           * We delete znodes in two occasions:
+           * 1- When reassigning tasks due to a faulty worker;
+           * 2- Once we have assigned a task, we remove it from
+           *    the list of pending tasks.
+           */
 
           case WATCHED =>
           case _ => log.error(s"Default case [${event.getType}]")
@@ -380,14 +383,13 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
     log.info(s"Deleting task [$number] path [$taskPath].")
     client.delete.inBackground.forPath(taskPath)
 
-   // this is here to show that all the tasks found on startup have been allocated and then deleted - so
+    // this is here to show that all the tasks found on startup have been allocated and then deleted - so
     // it has "recovered"
     recoveryLatch.countDown
   }
 
   private def deletePath(path: String): Unit = {
     log.info(s"Deleting [$path].")
-//    client.delete.inBackground.forPath(path)
     client.delete.inBackground.forPath(path)
   }
 
@@ -404,10 +406,10 @@ org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode f
           } catch {
             case e: Exception => log.error("Exception while trying to re-assign tasks", e)
           }
-        case PathChildrenCacheEvent.Type.CHILD_ADDED =>{
+        case PathChildrenCacheEvent.Type.CHILD_ADDED => {
           val tasks = client.getChildren.forPath(Tasks).asScala.toList
           log.info(s"New worker added [${path}] will assign [${tasks.size}] to him.")
-          assignTasks(tasks, initialTaskAssignmentCallback)
+          assignTasks(tasks, initialTaskAssignmentCallback, doNothing)
         }
         case PathChildrenCacheEvent.Type.CHILD_UPDATED =>
         case _ => // TODO perhaps handle this.

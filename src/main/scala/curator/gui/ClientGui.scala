@@ -1,10 +1,11 @@
 package curator
 package gui
 
+import java.util
 import java.util.concurrent.atomic.AtomicInteger
 
 import chapter_03.Logger
-import org.apache.curator.framework.api.transaction.{CuratorTransaction, CuratorTransactionFinal}
+import org.apache.curator.framework.api.transaction.{CuratorTransactionResult, CuratorTransaction, CuratorTransactionFinal}
 import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
 import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
 import org.apache.curator.retry.ExponentialBackoffRetry
@@ -14,7 +15,7 @@ import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.swing._
 import scala.swing.event._
-import scala.util.{Failure, Success}
+import scala.util.{Try, Failure, Success}
 import scala.util.control.NonFatal
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -51,12 +52,13 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
 
   def top = new MainFrame {
     title = "Client Gui"
+    private val AddWorkerText = "Add Worker"
 
-    val addTaskButton = new Button {      text = "Add Task"    }
-    val addWorkerButton = new Button {      text = "Add Worker"    }
-    val deleteTasksButton = new Button {      text = "Delete Tasks"    }
-    val deleteWorkersButton = new Button {      text = "Delete Workers"    }
-    val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
+    private val addTaskButton = new Button {      text = "Add Task"    }
+    private val addWorkerButton = new Button {       text = AddWorkerText    }
+    private val deleteTasksButton = new Button {      text = "Delete Tasks"    }
+    private val deleteWorkersButton = new Button {      text = "Delete Workers"    }
+    private val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
 
     contents = new BorderPanel {
 
@@ -115,6 +117,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       val nextNumber = workerNumber.getAndIncrement()
       val path = s"$Workers/worker-$nextNumber"
       createPath("worker", path, nextNumber)
+      addWorkerButton.text = s"$AddWorkerText-$nextNumber"
     }
 
     private def createPath(comment: String, path: String, number: Int) = {
@@ -126,15 +129,9 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       }
     }
 
-    deleteTasksButtonClicks.subscribe(_ => log.info("button clicked"))
-    deleteTasksButtonClicks.subscribe { _ =>
-      deleteChildren(Tasks)
-    }
+    deleteTasksButtonClicks.subscribe { _ =>   deleteChildren(Tasks)  }
 
-    deleteWorkersButtonClicks.subscribe(_ => log.info("button clicked"))
-    deleteWorkersButtonClicks.subscribe { _ =>
-      deleteChildren(Workers)
-    }
+    deleteWorkersButtonClicks.subscribe { _ => deleteChildren(Workers)    }
 
     def deleteChildren(path: String) = {
       log.info(s"deleteChildren path [${path}]")
@@ -150,25 +147,22 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
 
 
     deleteAssignmentsButtonClicks.subscribe { _ =>
-      log.info(s"deleteAssignments BEFORE XXXX")
+      log.info(s"DeleteAssignments BEFORE XXXX")
       val future = deleteAssignments()
       future.onComplete {
-        case Success(s) => log.info(s"Delete worked [$s]")
+        case Success(results) =>
+          for (result <- results) {
+            log.info(s"result [${result.getForPath}] [${result.getType}]")
+          }
+          log.info(s"Deleted [${results.size}] assignments.")
         case Failure(f) => log.warn("Delete failed", f)
       }
       log.info(s"deleteAssignments END XXXX")
     }
 
-
-    def deleteAssignments(): Future[Unit] = {
-
-      log.info(s"deleteAssignments before Future")
+    def deleteAssignments(): Future[List[CuratorTransactionResult]] = {
       Future {
-        try {
           val transaction = client.inTransaction()
-
-          log.info(s"deleteAssignments in Future")
-
           val workers = client.getChildren.forPath(Assign).asScala
           log.info(s"workers [${workers}]")
 
@@ -195,22 +189,12 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
             }
           }
 
-          /**
-           * These results are in the same order as added.
-           */
-          val results = transaction.asInstanceOf[CuratorTransactionFinal].commit()
-
-          for (result <- results.asScala) {
-            log.info(s"result [${result.getForPath}] [${result.getType}]")
-          }
-        } catch {
-          // NOTE there is no rollback method
-          case NonFatal(e) => log.error("Problem deleting assignments.", e)
-        }
-        log.info(s"deleteAssignments END in Future")
+        /**
+         * These results are in the same order as added.
+         */
+        val results: util.Collection[CuratorTransactionResult] = transaction.asInstanceOf[CuratorTransactionFinal].commit()
+        results.asScala.toList // doing toList Scala impl for an iterator is a stream.
       }
-
-
     }
 
     //TODO this is copied from Master, try to add to trait and mix in.
