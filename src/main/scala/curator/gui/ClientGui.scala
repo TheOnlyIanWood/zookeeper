@@ -4,6 +4,7 @@ package gui
 import java.util.concurrent.atomic.AtomicInteger
 
 import chapter_03.Logger
+import org.apache.curator.framework.api.transaction.{CuratorTransaction, CuratorTransactionFinal}
 import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
 import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
 import org.apache.curator.retry.ExponentialBackoffRetry
@@ -90,7 +91,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       }
     }
 
-    val deleteAssigmentsButtonClicks = Observable[Unit] { sub =>
+    val deleteAssignmentsButtonClicks = Observable[Unit] { sub =>
       deleteAssignmentsButton.reactions += {
         case ButtonClicked(_) => sub.onNext(())
       }
@@ -144,18 +145,19 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
     }
 
 
-    deleteAssigmentsButtonClicks.subscribe { _ =>
+    deleteAssignmentsButtonClicks.subscribe { _ =>
       deleteAssignments()
     }
 
-    def delete(path: String) = client.delete.forPath(path)
 
     def deleteAssignments() = {
+
+      val transaction = client.inTransaction();
+
       log.info(s"deleteAssignments")
 
       val workers = client.getChildren.forPath(Assign).asScala
       log.info(s"workers [${workers}]")
-
 
       for {
         worker <- workers
@@ -163,7 +165,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
       } {
         deleteChildren(path)
         log.info(s"deleting worker [$path]")
-        delete(path)
+        delete(path, transaction)
       }
 
       def deleteChildren(worker: String) = {
@@ -173,10 +175,20 @@ object ClientGui extends scala.swing.SimpleSwingApplication with Logger {
         } {
           val taskPath = s"$worker/$task"
           log.info(s"deleting task [$taskPath]")
-          delete(taskPath)
+          delete(taskPath, transaction)
         }
       }
 
+      val results = transaction.asInstanceOf[CuratorTransactionFinal].commit()
+      for (result <- results.asScala) {
+        log.info(s"result [${result.getForPath}] [${result.getType}]")
+      }
+
+    }
+
+    //TODO this is copied from Master, try to add to trait and mix in.
+    def delete(path: String, transaction: CuratorTransaction): Unit = {
+      transaction.delete.forPath(path).and()
     }
 
   }
