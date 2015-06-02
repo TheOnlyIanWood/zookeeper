@@ -3,7 +3,6 @@ package gui
 
 import java.util
 import java.util.concurrent.atomic.AtomicInteger
-
 import chapter_03.Logger
 import org.apache.curator.framework.api.transaction.{CuratorTransactionResult, CuratorTransaction, CuratorTransactionFinal}
 import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
@@ -13,6 +12,7 @@ import rx.lang.scala._
 
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 import scala.swing._
 import scala.swing.event._
 import scala.util.{Try, Failure, Success}
@@ -154,72 +154,65 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       }
     }
 
-    //    deleteAssignmentsButtonClicks.subscribe { _ =>
-    //      log.info(s"DeleteAssignment")
-    //      deleteAssignments().onComplete {
-    //        case Success(results) =>
-    //          for (result <- results) {
-    //            log.info(s"result [${result.getForPath}] [${result.getType}]")
-    //            resultsFields.text = resultsFields.text + "\n" + result.getForPath // TODO do this properly this needs to be on UI thread.
-    //          }
-    //          log.info(s"Deleted [${results.size}] assignments.")
-    //
-    //        case Failure(f) => log.warn("Delete failed", f)
-    //      }
-    //    }
 
-    def deleteAssignments2: Observable[List[CuratorTransactionResult]] = {
-      import scala.concurrent.duration._
-      Observable.from(deleteAssignments()).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Nil))
-    }
+    deleteAssignmentsButton.clicks.map(_ => deleteAssignmentsObs).concat.observeOn(swingScheduler).subscribe {
+      response =>  response match {
 
+          case Success(results) =>
+            resultsFields.text = resultsFields.text + "\nFinished"
+            log.info(s"Finished")
 
-    deleteAssignmentsButton.clicks.map(_ => deleteAssignments2).concat.observeOn(swingScheduler).subscribe {
-      response =>
-        resultsFields.text = resultsFields.text + "Finished"
-        log.info(s"Finished")
-
-        for (result <- response) {
-          log.info(s"result [${result.getForPath}] [${result.getType}]")
-          resultsFields.text = resultsFields.text + "\n" + result.getForPath
+            for (result <- results) {
+              log.info(s"result [${result.getForPath}] [${result.getType}]")
+              resultsFields.text =  s"${resultsFields.text}\n${result.getForPath}"
+            }
+          case Failure(f) =>
+            val message = s"Delete failed [${f.getMessage}]"
+            log.warn(message, f)
+            resultsFields.text = s"${resultsFields.text}\n$message"
         }
     }
 
+    def deleteAssignmentsObs: Observable[Try[List[CuratorTransactionResult]]] = {
+      Observable.from(deleteAssignments()).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
+    }
 
-    def deleteAssignments(): Future[List[CuratorTransactionResult]] = {
+    def deleteAssignments(): Future[Try[List[CuratorTransactionResult]]] = {
       Future {
-        val transaction = client.inTransaction()
-        val workers = client.getChildren.forPath(Assign).asScala
-        log.info(s"workers [${workers}]")
+        Try {
+          val transaction = client.inTransaction()
+          val workers = client.getChildren.forPath(Assign).asScala
+          log.info(s"workers [${workers}]")
 
-        for {
-          worker <- workers
-          path = s"$Assign/$worker"
-        } {
-          deleteChildren(path)
-          log.info(s"deleting worker [$path]")
-          if (path == "/assign/worker-5") {
-            throw new Exception("Hopefully fail transaction")
-          }
-          delete(path, transaction)
-        }
-
-        def deleteChildren(worker: String) = {
-          log.info(s"deleteChildren for  worker [${worker}]")
           for {
-            task <- client.getChildren.forPath(worker).asScala
+            worker <- workers
+            path = s"$Assign/$worker"
           } {
-            val taskPath = s"$worker/$task"
-            log.info(s"deleting task [$taskPath]")
-            delete(taskPath, transaction)
+            deleteChildren(path)
+            log.info(s"deleting worker [$path]")
+            if (path == "/assign/worker-5") {
+              throw new Exception("Hopefully fail transaction")
+            }
+            delete(path, transaction)
           }
-        }
 
-        /**
-         * These results are in the same order as added.
-         */
-        val results: util.Collection[CuratorTransactionResult] = transaction.asInstanceOf[CuratorTransactionFinal].commit()
-        results.asScala.toList // doing toList Scala impl for an iterator is a stream.
+          def deleteChildren(worker: String) = {
+            log.info(s"deleteChildren for  worker [${worker}]")
+            for {
+              task <- client.getChildren.forPath(worker).asScala
+            } {
+              val taskPath = s"$worker/$task"
+              log.info(s"deleting task [$taskPath]")
+              delete(taskPath, transaction)
+            }
+          }
+
+          /**
+           * These results are in the same order as added.
+           */
+          val results: util.Collection[CuratorTransactionResult] = transaction.asInstanceOf[CuratorTransactionFinal].commit()
+          results.asScala.toList // doing toList Scala impl for an iterator is a stream.
+        }
       }
     }
 
