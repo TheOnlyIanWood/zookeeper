@@ -211,7 +211,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
            * These results are in the same order as added.
            */
           val results: util.Collection[CuratorTransactionResult] = transaction.asInstanceOf[CuratorTransactionFinal].commit()
-          results.asScala.toList // doing toList Scala impl for an iterator is a stream.
+          results.asScala.toList // Note doing toList as the Scala impl for an iterator is a stream.
         }
       }
     }
