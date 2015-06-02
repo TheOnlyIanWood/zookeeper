@@ -35,6 +35,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     val deleteWorkersButton = new Button {      text = "Delete Workers"    }
     val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
     val resultsFields = new TextArea
+    val scrollPane = new ScrollPane(resultsFields)
 
     contents = new BorderPanel {
 
@@ -48,7 +49,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
         layout(deleteAssignmentsButton) = Center
 
       }) = North
-      layout(resultsFields) = Center
+      layout(scrollPane) = Center
     }
   }
 
@@ -153,19 +154,37 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       }
     }
 
-    deleteAssignmentsButtonClicks.subscribe { _ =>
-      log.info(s"DeleteAssignment")
-      deleteAssignments().onComplete {
-        case Success(results) =>
-          for (result <- results) {
-            log.info(s"result [${result.getForPath}] [${result.getType}]")
-            resultsFields.text = resultsFields.text + "\n" + result.getForPath // TODO do this properly this needs to be on UI thread.
-          }
-          log.info(s"Deleted [${results.size}] assignments.")
+    //    deleteAssignmentsButtonClicks.subscribe { _ =>
+    //      log.info(s"DeleteAssignment")
+    //      deleteAssignments().onComplete {
+    //        case Success(results) =>
+    //          for (result <- results) {
+    //            log.info(s"result [${result.getForPath}] [${result.getType}]")
+    //            resultsFields.text = resultsFields.text + "\n" + result.getForPath // TODO do this properly this needs to be on UI thread.
+    //          }
+    //          log.info(s"Deleted [${results.size}] assignments.")
+    //
+    //        case Failure(f) => log.warn("Delete failed", f)
+    //      }
+    //    }
 
-        case Failure(f) => log.warn("Delete failed", f)
-      }
+    def deleteAssignments2: Observable[List[CuratorTransactionResult]] = {
+      import scala.concurrent.duration._
+      Observable.from(deleteAssignments()).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Nil))
     }
+
+
+    deleteAssignmentsButton.clicks.map(_ => deleteAssignments2).concat.observeOn(swingScheduler).subscribe {
+      response =>
+        resultsFields.text = resultsFields.text + "Finished"
+        log.info(s"Finished")
+
+        for (result <- response) {
+          log.info(s"result [${result.getForPath}] [${result.getType}]")
+          resultsFields.text = resultsFields.text + "\n" + result.getForPath
+        }
+    }
+
 
     def deleteAssignments(): Future[List[CuratorTransactionResult]] = {
       Future {
