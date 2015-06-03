@@ -17,7 +17,7 @@ import org.apache.curator.retry.ExponentialBackoffRetry
 import org.apache.zookeeper.CreateMode
 import org.apache.zookeeper.book.recovery.RecoveredAssignments
 import org.apache.zookeeper.book.recovery.RecoveredAssignments.RecoveryCallback
-
+import org.apache.curator.framework.recipes.cache.PathChildrenCacheEvent.Type._
 import scala.collection.JavaConverters._
 import scala.util.Random
 
@@ -145,14 +145,14 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
       log.info(s"path [${path}] type [${event.getType}]")
 
       event.getType match {
-        case PathChildrenCacheEvent.Type.CHILD_ADDED =>
+        case CHILD_ADDED =>
           try {
             assignTask(event.getData.getPath.replaceFirst(s"$Tasks/", ""), event.getData.getData, initialTaskAssignmentCallback, doNothing)
           } catch {
             case e: Exception => log.error("Exception when assigning task.", e) // THIS happens when NOT in background.
           }
 
-        case PathChildrenCacheEvent.Type.CHILD_UPDATED =>
+        case CHILD_UPDATED =>
         case _ => // TODO perhaps handle this.
 
       }

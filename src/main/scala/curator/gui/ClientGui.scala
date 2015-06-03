@@ -9,7 +9,7 @@ import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildr
 import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
 import org.apache.curator.retry.ExponentialBackoffRetry
 import rx.lang.scala._
-
+import org.apache.curator.framework.recipes.cache.PathChildrenCacheEvent.Type._
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -28,8 +28,9 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
   abstract class GuiFrame extends MainFrame {
     title = "Client Gui"
     val AddWorkerText = "Add Worker"
+    val AddTaskText = "Add Task"
 
-    val addTaskButton = new Button {      text = "Add Task"    }
+    val addTaskButton = new Button {      text = AddTaskText    }
     val addWorkerButton = new Button {     text = AddWorkerText    }
     val deleteTasksButton = new Button {      text = "Delete Tasks"    }
     val deleteWorkersButton = new Button {      text = "Delete Workers"    }
@@ -63,25 +64,45 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
     client.start()
 
-    private val tasksCache = new PathChildrenCache(client, Tasks, true)
 
-    private val taskNumber = new AtomicInteger(1)
-    private val workerNumber = new AtomicInteger(1)
+    private val taskNumber = new AtomicInteger(0) //using incrementAndGet so first will be 1
+    private val workerNumber = new AtomicInteger(0)
 
+    def handleChildEvent(client: CuratorFramework, event: PathChildrenCacheEvent, entityType: String, button: Button, ai: AtomicInteger) = {
 
-    val tasksCacheListener = new PathChildrenCacheListener {
-      override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
+      val path = event.getData.getPath
 
-        val path = event.getData.getPath
-        log.info(s"path [${path}] type [${event.getType}]")
+      val number = path.split("-")(1).toInt
 
+      val eventType = event.getType
+      val eventDescription = s"path [${path}] type [${eventType}] Number [$number]"
+      log.info(eventDescription)
+      eventType match {
+        case CHILD_ADDED => if (number > ai.get()) {
+          log.info(s"Setting $entityType number to [${number}]")
+          ai.set(number)
+          button.text = s"$AddTaskText-$number" // TODO this is not on AWT thread.
+        }
+        case _ => log.info(s"not handling [${eventDescription}]")
 
       }
     }
 
-    tasksCache.getListenable.addListener(tasksCacheListener)
-    tasksCache.start
+    private val tasksCache = new PathChildrenCache(client, Tasks, true)
+    tasksCache.getListenable.addListener(new PathChildrenCacheListener {
+      override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
+        handleChildEvent(client, event, "task", addTaskButton, taskNumber)
+      }
+    })
+    tasksCache.start()
 
+    private val workersCache = new PathChildrenCache(client, Workers, true)
+    workersCache.getListenable.addListener(new PathChildrenCacheListener {
+      override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
+        handleChildEvent(client, event, "worker", addWorkerButton, workerNumber)
+      }
+    })
+    workersCache.start()
 
     val taskButtonClicks = Observable[Unit] { sub =>
       addTaskButton.reactions += {
@@ -113,18 +134,16 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       }
     }
 
-    taskButtonClicks.subscribe(_ => log.info("button clicked"))
-
     taskButtonClicks.subscribe { _ =>
-      val nextNumber = taskNumber.getAndIncrement()
+      val nextNumber = taskNumber.incrementAndGet()
+
       val path = s"$Tasks/task-$nextNumber"
       createPath("task", path, nextNumber)
+      addTaskButton.text = s"$AddTaskText-$nextNumber"
     }
 
-    workerButtonClicks.subscribe(_ => log.info("button clicked"))
-
     workerButtonClicks.subscribe { _ =>
-      val nextNumber = workerNumber.getAndIncrement()
+      val nextNumber = workerNumber.incrementAndGet()
       val path = s"$Workers/worker-$nextNumber"
       createPath("worker", path, nextNumber)
       addWorkerButton.text = s"$AddWorkerText-$nextNumber"
@@ -150,7 +169,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       for (child <- children) {
         val childPath = s"$path/$child"
         log.info(s"Deleting [$childPath]")
-        client.delete.forPath(childPath)
+        client.delete.guaranteed.forPath(childPath)
       }
     }
 
