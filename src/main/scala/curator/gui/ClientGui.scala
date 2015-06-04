@@ -1,7 +1,9 @@
 package curator
 package gui
 
+import java.text.SimpleDateFormat
 import java.util
+import java.util.Date
 import java.util.concurrent.atomic.AtomicInteger
 import chapter_03.Logger
 import org.apache.curator.framework.api.transaction.{CuratorTransactionResult, CuratorTransaction, CuratorTransactionFinal}
@@ -27,8 +29,10 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
   abstract class GuiFrame extends MainFrame {
     title = "Client Gui"
-    val AddWorkerText = "Add Worker"
+
+    case class ButtonTask(button: Button, task: String)
     val AddTaskText = "Add Task"
+    val AddWorkerText = "Add Worker"
 
     val addTaskButton = new Button {      text = AddTaskText    }
     val addWorkerButton = new Button {     text = AddWorkerText    }
@@ -61,14 +65,20 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
 
     private val client = CuratorFrameworkFactory.newClient("127.0.0.1:2181", new ExponentialBackoffRetry(1000, 5))
-
     client.start()
 
+    private val simpleDateFormatter = new ThreadLocal[SimpleDateFormat]()
+    simpleDateFormatter.set(new SimpleDateFormat("HH:mm:ss.SSS"))
 
     private val taskNumber = new AtomicInteger(0) //using incrementAndGet so first will be 1
     private val workerNumber = new AtomicInteger(0)
 
-    def handleChildEvent(client: CuratorFramework, event: PathChildrenCacheEvent, entityType: String, button: Button, ai: AtomicInteger) = {
+    def handleChildEvent(client: CuratorFramework,
+                         event: PathChildrenCacheEvent,
+                         entityType: String,
+                         button: Button,
+                         buttonText: String,
+                         ai: AtomicInteger) = {
 
       val path = event.getData.getPath
 
@@ -81,7 +91,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
         case CHILD_ADDED => if (number > ai.get()) {
           log.info(s"Setting $entityType number to [${number}]")
           ai.set(number)
-          button.text = s"$AddTaskText-$number" // TODO this is not on AWT thread.
+          button.text = s"$buttonText-$number" // TODO this is not on AWT thread.
         }
         case _ => log.info(s"not handling [${eventDescription}]")
 
@@ -91,7 +101,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     private val tasksCache = new PathChildrenCache(client, Tasks, true)
     tasksCache.getListenable.addListener(new PathChildrenCacheListener {
       override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
-        handleChildEvent(client, event, "task", addTaskButton, taskNumber)
+        handleChildEvent(client, event, "task", addTaskButton, AddTaskText, taskNumber)
       }
     })
     tasksCache.start()
@@ -99,96 +109,108 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     private val workersCache = new PathChildrenCache(client, Workers, true)
     workersCache.getListenable.addListener(new PathChildrenCacheListener {
       override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
-        handleChildEvent(client, event, "worker", addWorkerButton, workerNumber)
+        handleChildEvent(client, event, "worker", addWorkerButton, AddWorkerText, workerNumber)
       }
     })
     workersCache.start()
 
-    val taskButtonClicks = Observable[Unit] { sub =>
-      addTaskButton.reactions += {
-        case ButtonClicked(_) => sub.onNext(())
+    val deleteTasks = ButtonTask(deleteTasksButton, Tasks)
+    val deleteWorkers = ButtonTask(deleteWorkersButton, Workers)
+
+    wireDeleteButton(deleteTasks)
+    wireDeleteButton(deleteWorkers)
+
+    def wireDeleteButton(b: ButtonTask) = {
+      b.button.clicks.map(_ => deleteChildren(b.task)).concat.observeOn(swingScheduler).subscribe { _ match {
+          case Success(results) =>
+            val message = s"Finished deleting ${b.task}"
+            appendResults(message)
+            log.info(message)
+
+            for (result <- results) {
+              val resultDescription = s"[${result.getForPath}] deleted"
+              log.info(resultDescription)
+              appendResults(resultDescription)
+            }
+          case Failure(t) => log.warn(s"delete failed [${t}]")
+        }
       }
     }
 
-    val workerButtonClicks = Observable[Unit] { sub =>
-      addWorkerButton.reactions += {
-        case ButtonClicked(_) => sub.onNext(())
-      }
-    }
-
-    val deleteTasksButtonClicks = Observable[Unit] { sub =>
-      deleteTasksButton.reactions += {
-        case ButtonClicked(_) => sub.onNext(())
-      }
-    }
-
-    val deleteWorkersButtonClicks = Observable[Unit] { sub =>
-      deleteWorkersButton.reactions += {
-        case ButtonClicked(_) => sub.onNext(())
-      }
-    }
-
-    val deleteAssignmentsButtonClicks = Observable[Unit] { sub =>
-      deleteAssignmentsButton.reactions += {
-        case ButtonClicked(_) => sub.onNext(())
-      }
-    }
-
-    taskButtonClicks.subscribe { _ =>
+    addTaskButton.clicks.map { _ =>
       val nextNumber = taskNumber.incrementAndGet()
-
       val path = s"$Tasks/task-$nextNumber"
       createPath("task", path, nextNumber)
-      addTaskButton.text = s"$AddTaskText-$nextNumber"
+    }.concat.observeOn(swingScheduler).subscribe { response => response match {
+      case Success(results) =>
+        val (result, number) = results
+        log.info(s"results [${results}]. [$result] [$number]")
+        addTaskButton.text = s"$AddTaskText-$number"
+        appendResults(s"[$result] created.")
+      case Failure(t) => log.info(s"t [${t}]")
     }
 
-    workerButtonClicks.subscribe { _ =>
+    }
+
+    addWorkerButton.clicks.map { _ =>
       val nextNumber = workerNumber.incrementAndGet()
       val path = s"$Workers/worker-$nextNumber"
       createPath("worker", path, nextNumber)
-      addWorkerButton.text = s"$AddWorkerText-$nextNumber"
+      }.concat.observeOn(swingScheduler).subscribe { response => response match {
+          case Success(results) =>
+            val (result, number) = results
+            log.info(s"results [${results}]. [$result] [$number]")
+            addWorkerButton.text = s"$AddWorkerText-$number"
+            appendResults(s"[$result] created.")
+          case Failure(t) => log.info(s"t [${t}]")
+         }
     }
 
-    private def createPath(comment: String, path: String, number: Int) = {
-      log.info(s"going to make [$comment] [$path]")
-      try {
-        client.create.forPath(path, number.toString.getBytes)
-      } catch {
-        case NonFatal(e) => log.info(s"Problem creating [$path]", e)
-      }
+    private def createPath(comment: String, path: String, number: Int): Observable[Try[(String, Int)]] = {
+      Observable.from(
+          Future {
+            Try {
+              log.info(s"going to make [$comment] [$path]")
+              val result = client.create.forPath(path, number.toString.getBytes)
+              (result, number)
+            }
+          }).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
     }
 
-    deleteTasksButtonClicks.subscribe { _ => deleteChildren(Tasks) }
+    def deleteChildren(path: String): Observable[Try[List[CuratorTransactionResult]]] = {
+      Observable.from(
+      Future {
+        Try {
+          log.info(s"deleteChildren path [${path}]")
+          val transaction = client.inTransaction()
+          val children = client.getChildren.forPath(path).asScala
 
-    deleteWorkersButtonClicks.subscribe { _ => deleteChildren(Workers) }
-
-    def deleteChildren(path: String) = {
-      log.info(s"deleteChildren path [${path}]")
-      val children = client.getChildren.forPath(path).asScala
-
-      for (child <- children) {
-        val childPath = s"$path/$child"
-        log.info(s"Deleting [$childPath]")
-        client.delete.guaranteed.forPath(childPath)
-      }
+          for (child <- children) {
+            val childPath = s"$path/$child"
+            log.info(s"Deleting [$childPath]")
+            transaction.delete.forPath(childPath)
+          }
+          val results: util.Collection[CuratorTransactionResult] = transaction.asInstanceOf[CuratorTransactionFinal].commit()
+          results.asScala.toList // Note doing toList as the Scala impl for an iterator is a stream.
+        }
+      }).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
     }
-
 
     deleteAssignmentsButton.clicks.map(_ => deleteAssignmentsObs).concat.observeOn(swingScheduler).subscribe {
       response =>  response match {
 
           case Success(results) =>
-            resultsFields.text = resultsFields.text + "\nFinished"
+            appendResults(s"Finished")
             log.info(s"Finished")
 
             for (result <- results) {
-              log.info(s"result [${result.getForPath}] [${result.getType}]")
-              resultsFields.text =  s"${resultsFields.text}\n${result.getForPath}"
+              log.info(s"result [${result.getForPath}] [${result.getType}] deleted")
+              appendResults(result.getForPath)
             }
           case Failure(f) =>
             val message = s"Delete failed [${f.getMessage}]"
             log.warn(message, f)
-            resultsFields.text = s"${resultsFields.text}\n$message"
+            appendResults(message)
         }
     }
 
@@ -238,6 +260,12 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     def delete(path: String, transaction: CuratorTransaction): CuratorTransactionFinal = {
       transaction.delete.forPath(path).and()
     }
+
+    private def appendResults(result: String)={
+      val datePart = simpleDateFormatter.get.format(new Date())
+      resultsFields.text =  s"${resultsFields.text}\n$datePart\t$result"
+    }
+
   }
 
 
