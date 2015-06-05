@@ -5,7 +5,9 @@ import java.text.SimpleDateFormat
 import java.util
 import java.util.Date
 import java.util.concurrent.atomic.AtomicInteger
+import akka.actor.{Identify, ActorRef, ActorSystem}
 import chapter_03.Logger
+import curator.Master._
 import org.apache.curator.framework.api.transaction.{CuratorTransactionResult, CuratorTransaction, CuratorTransactionFinal}
 import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
 import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
@@ -21,6 +23,31 @@ import scala.util.{Try, Failure, Success}
 import scala.util.control.NonFatal
 import scala.concurrent.ExecutionContext.Implicits.global
 
+
+object Util{
+
+  def createPath(client:  CuratorFramework, comment: String, path: String, number: Int): Observable[Try[(String, Int)]] = {
+    Observable.from(
+      Future {
+        Try {
+            createPathSync(client,comment,path,number)
+        }
+      }).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
+  }
+
+  def createPathSync(client:  CuratorFramework, comment: String, path: String, number: Int)={
+    log.info(s"going to make [$comment] [$path]")
+    val result = client.create.forPath(path, number.toString.getBytes)
+    (result, number)
+  }
+
+  def createPathSync(client: CuratorFramework, comment: String, path: String, data: Array[Byte]) = {
+    log.info(s"going to make [$comment] [$path]")
+    val result = client.create.forPath(path, data)
+    (result, data)
+  }
+
+}
 
 /**
  * Created by ian on 28/05/15.
@@ -62,6 +89,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     self: GuiFrame =>
 
     import Master._
+    import Util._
 
 
     private val client = CuratorFrameworkFactory.newClient("127.0.0.1:2181", new ExponentialBackoffRetry(1000, 5))
@@ -72,6 +100,8 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
     private val taskNumber = new AtomicInteger(0) //using incrementAndGet so first will be 1
     private val workerNumber = new AtomicInteger(0)
+
+    val system = ActorSystem()
 
     def handleChildEvent(client: CuratorFramework,
                          event: PathChildrenCacheEvent,
@@ -109,6 +139,15 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     private val workersCache = new PathChildrenCache(client, Workers, true)
     workersCache.getListenable.addListener(new PathChildrenCacheListener {
       override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
+
+        val data = new String(event.getData.getData)
+        log.info(s"data [${data}] from event [$event]")
+
+        system.actorSelection(data) ! "hi"
+
+        // Hector showed me.
+//        system.actorSelection(path) ! Identify(path)
+
         handleChildEvent(client, event, "worker", addWorkerButton, AddWorkerText, workerNumber)
       }
     })
@@ -138,9 +177,9 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     }
 
     addTaskButton.clicks.map { _ =>
-      val nextNumber = taskNumber.incrementAndGet()
+      val nextNumber = taskNumber.incrementAndGet() // TODO maybe this can be incremented when a worker is shown to have started?
       val path = s"$Tasks/task-$nextNumber"
-      createPath("task", path, nextNumber)
+      createPath(client, "task", path, nextNumber)
     }.concat.observeOn(swingScheduler).subscribe { response => response match {
       case Success(results) =>
         val (result, number) = results
@@ -152,29 +191,14 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
     }
 
-    addWorkerButton.clicks.map { _ =>
-      val nextNumber = workerNumber.incrementAndGet()
-      val path = s"$Workers/worker-$nextNumber"
-      createPath("worker", path, nextNumber)
-      }.concat.observeOn(swingScheduler).subscribe { response => response match {
-          case Success(results) =>
-            val (result, number) = results
-            log.info(s"results [${results}]. [$result] [$number]")
-            addWorkerButton.text = s"$AddWorkerText-$number"
-            appendResults(s"[$result] created.")
-          case Failure(t) => log.info(s"t [${t}]")
-         }
-    }
-
-    private def createPath(comment: String, path: String, number: Int): Observable[Try[(String, Int)]] = {
-      Observable.from(
-          Future {
-            Try {
-              log.info(s"going to make [$comment] [$path]")
-              val result = client.create.forPath(path, number.toString.getBytes)
-              (result, number)
-            }
-          }).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
+    addWorkerButton.reactions += {
+      case ButtonClicked(_) =>
+        val nextNumber = workerNumber.incrementAndGet()
+        val workerName = s"worker-$nextNumber"
+        val path = s"$Workers/$workerName"
+        val newActor = system.actorOf(WorkerActor.props(workerName, path, nextNumber), workerName)
+        newActor ! "hello"
+        addWorkerButton.text = s"$AddWorkerText-$nextNumber"
     }
 
     def deleteChildren(path: String): Observable[Try[List[CuratorTransactionResult]]] = {
