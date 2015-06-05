@@ -2,12 +2,12 @@ package curator
 
 import java.util.concurrent.atomic.AtomicInteger
 
-import akka.actor.{Props, Actor}
+import akka.actor.{PoisonPill, Props, Actor}
 import akka.actor.Actor.Receive
 import akka.event.Logging
 import chapter_03.Logger
 import curator.Master._
-import curator.WorkerActor.TaskRequest
+import curator.WorkerActor.{ShutdownGracefully, TaskRequest}
 import gui.Util._
 import org.apache.curator.framework.CuratorFrameworkFactory
 import org.apache.curator.retry.ExponentialBackoffRetry
@@ -16,6 +16,8 @@ object WorkerActor {
 
   trait WorkerMessage
   case class TaskRequest(number: Int) extends WorkerMessage
+  case object ShutdownGracefully extends WorkerMessage
+
 
   def props(name: String, path: String, number: Int): Props = Props(new WorkerActor(name, path, number))
 }
@@ -38,5 +40,17 @@ class WorkerActor(name: String, znodePath: String, number: Int) extends Actor  {
     case "hi" => log.info(s"got a hi")
 
     case t @ TaskRequest(number)=> log.info(s"Asked to do [$t]")
+
+    case ShutdownGracefully =>
+      log.info("Asked to shutdown")
+      client.delete.guaranteed.forPath(znodePath)
+      context.stop(self)
+
+  }
+
+  @throws[Exception](classOf[Exception])
+  override def postStop(): Unit = {
+    log.info("postStop xxxxxxxxxxxxxxxxxxxxx ")
+    super.postStop()
   }
 }

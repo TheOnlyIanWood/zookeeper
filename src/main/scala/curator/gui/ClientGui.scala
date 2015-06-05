@@ -5,12 +5,12 @@ import java.text.SimpleDateFormat
 import java.util
 import java.util.Date
 import java.util.concurrent.atomic.AtomicInteger
-import akka.actor.{Identify, ActorRef, ActorSystem}
+import akka.actor.{PoisonPill, Identify, ActorRef, ActorSystem}
 import chapter_03.Logger
 import curator.Master._
-import curator.WorkerActor.TaskRequest
+import curator.WorkerActor.{ShutdownGracefully, TaskRequest}
 import org.apache.curator.framework.api.transaction.{CuratorTransactionResult, CuratorTransaction, CuratorTransactionFinal}
-import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
+import org.apache.curator.framework.recipes.cache.{ChildData, PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
 import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
 import org.apache.curator.retry.ExponentialBackoffRetry
 import rx.lang.scala._
@@ -65,6 +65,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     val addTaskButton = new Button {      text = AddTaskText    }
     val addWorkerButton = new Button {     text = AddWorkerText    }
     val deleteWorkersButton = new Button {      text = "Delete Workers"    }
+    val clearUpWorkersButton = new Button {      text = "Clear up Workers"    }
     val resultsFields = new TextArea
     val scrollPane = new ScrollPane(resultsFields)
 
@@ -76,6 +77,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
         layout(addTaskButton) = West
         layout(addWorkerButton) = East
         layout(deleteWorkersButton) = North
+        layout(clearUpWorkersButton) = Center
 
       }) = North
       layout(scrollPane) = Center
@@ -100,30 +102,6 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
     val system = ActorSystem()
 
-    def handleChildEvent(client: CuratorFramework,
-                         event: PathChildrenCacheEvent,
-                         entityType: String,
-                         button: Button,
-                         buttonText: String,
-                         ai: AtomicInteger) = {
-
-      val path = event.getData.getPath
-
-      val number = path.split("-")(1).toInt
-
-      val eventType = event.getType
-      val eventDescription = s"path [${path}] type [${eventType}] Number [$number]"
-      log.info(eventDescription)
-      eventType match {
-        case CHILD_ADDED => if (number > ai.get()) {
-          log.info(s"Setting $entityType number to [${number}]")
-          ai.set(number)
-          button.text = s"$buttonText-$number" // TODO this is not on AWT thread.
-        }
-        case _ => log.info(s"not handling [${eventDescription}]")
-
-      }
-    }
     val rand = new Random(System.currentTimeMillis)
 
     private val workersCache = new PathChildrenCache(client, Workers, true)
@@ -131,37 +109,35 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
 
         val data = new String(event.getData.getData)
-        log.info(s"data [${data}] from event [$event]")
+        event.getType match {
+          case CHILD_ADDED =>
+            log.info(s"ADDED: data [${data}] from event [$event]")
+            system.actorSelection(data) ! "hi"
 
-        system.actorSelection(data) ! "hi"
+          case CHILD_REMOVED =>
+            log.info(s"REMOVED: data [${data}] from event [$event]")
+
+        }
 
         // Hector showed me.
 //        system.actorSelection(path) ! Identify(path)
 
-        handleChildEvent(client, event, "worker", addWorkerButton, AddWorkerText, workerNumber)
       }
     })
     workersCache.start()
 
-    val deleteWorkers = ButtonTask(deleteWorkersButton, Workers)
 
-    wireDeleteButton(deleteWorkers)
-
-    def wireDeleteButton(b: ButtonTask) = {
-      b.button.clicks.map(_ => deleteChildren(b.task)).concat.observeOn(swingScheduler).subscribe { _ match {
-          case Success(results) =>
-            val message = s"Finished deleting ${b.task}"
-            appendResults(message)
-            log.info(message)
-
-            for (result <- results) {
-              val resultDescription = s"[${result.getForPath}] deleted"
-              log.info(resultDescription)
-              appendResults(resultDescription)
-            }
-          case Failure(t) => log.warn(s"delete failed [${t}]")
+    deleteWorkersButton.reactions += {
+      case ButtonClicked(_) =>
+        log.info("delete workers")
+        val workersList: List[ChildData] = workersCache.getCurrentData.asScala.toList
+        for(w <- workersList){
+          val actor = new String(w.getData)
+          log.info(s"Asking to shutdown [${actor}]")
+          system.actorSelection(actor) ! ShutdownGracefully
         }
-      }
+
+
     }
 
     addTaskButton.reactions += {
@@ -176,6 +152,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
         if (!workersList.isEmpty) {
           val designatedWorker = new String(workersList.get(rand.nextInt(workersList.size)).getData)
           system.actorSelection(designatedWorker) ! TaskRequest(nextNumber)
+          addTaskButton.text = s"$AddTaskText-$nextNumber"
         }
 
     }
@@ -190,26 +167,57 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
         addWorkerButton.text = s"$AddWorkerText-$nextNumber"
     }
 
-    def deleteChildren(path: String): Observable[Try[List[CuratorTransactionResult]]] = {
-      Observable.from(
+    clearUpWorkersButton.clicks.map(_ => clearUpWorkersFutureObs).concat.observeOn(swingScheduler).subscribe {
+      response =>  response match {
+
+        case Success(results) =>
+          appendResults(s"Finished")
+          log.info(s"Finished")
+
+          for (result <- results) {
+            log.info(s"result [${result.getForPath}] [${result.getType}] deleted")
+            appendResults(result.getForPath)
+          }
+        case Failure(f) =>
+          val message = s"Delete failed [${f.getMessage}]"
+          log.warn(message, f)
+          appendResults(message)
+      }
+    }
+    
+
+    def clearUpWorkersFutureObs: Observable[Try[List[CuratorTransactionResult]]] = {
+      Observable.from(clearUpWorkersFuture()).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
+    }
+
+    def clearUpWorkersFuture(): Future[Try[List[CuratorTransactionResult]]] = {
       Future {
         Try {
-          log.info(s"deleteChildren path [${path}]")
           val transaction = client.inTransaction()
-          val children = client.getChildren.forPath(path).asScala
-
-          for (child <- children) {
-            val childPath = s"$path/$child"
-            log.info(s"Deleting [$childPath]")
-            transaction.delete.forPath(childPath)
+          val workers = client.getChildren.forPath(Workers).asScala.map{
+            worker => s"$Workers/$worker"
           }
+          log.info(s"workers [${workers}]")
+
+          for {
+            worker <- workers
+             } {
+            log.info(s"deleting worker [$worker]")
+            if (worker == s"$Workers/worker-5") {
+              throw new Exception("Hopefully fail transaction")
+            }
+            delete(worker, transaction)
+          }
+
+          
+          /**
+           * These results are in the same order as added.
+           */
           val results: util.Collection[CuratorTransactionResult] = transaction.asInstanceOf[CuratorTransactionFinal].commit()
           results.asScala.toList // Note doing toList as the Scala impl for an iterator is a stream.
         }
-      }).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
+      }
     }
-
-
 
     def delete(path: String, transaction: CuratorTransaction): CuratorTransactionFinal = {
       transaction.delete.forPath(path).and()
