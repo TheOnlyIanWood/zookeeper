@@ -4,17 +4,24 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import akka.actor.{Props, Actor}
 import akka.actor.Actor.Receive
+import akka.event.Logging
 import chapter_03.Logger
 import curator.Master._
+import curator.WorkerActor.TaskRequest
 import gui.Util._
 import org.apache.curator.framework.CuratorFrameworkFactory
 import org.apache.curator.retry.ExponentialBackoffRetry
 
 object WorkerActor {
+
+  trait WorkerMessage
+  case class TaskRequest(number: Int) extends WorkerMessage
+
   def props(name: String, path: String, number: Int): Props = Props(new WorkerActor(name, path, number))
 }
 
-class WorkerActor(name: String, znodePath: String, number: Int) extends Actor with Logger {
+class WorkerActor(name: String, znodePath: String, number: Int) extends Actor  {
+  val log = Logging(context.system, this)
   log.info(s"Worker [${name}] started")
 
 
@@ -30,5 +37,6 @@ class WorkerActor(name: String, znodePath: String, number: Int) extends Actor wi
 
     case "hi" => log.info(s"got a hi")
 
+    case t @ TaskRequest(number)=> log.info(s"Asked to do [$t]")
   }
 }

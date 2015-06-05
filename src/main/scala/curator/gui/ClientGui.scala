@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import akka.actor.{Identify, ActorRef, ActorSystem}
 import chapter_03.Logger
 import curator.Master._
+import curator.WorkerActor.TaskRequest
 import org.apache.curator.framework.api.transaction.{CuratorTransactionResult, CuratorTransaction, CuratorTransactionFinal}
 import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
 import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
@@ -19,7 +20,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.swing._
 import scala.swing.event._
-import scala.util.{Try, Failure, Success}
+import scala.util.{Random, Try, Failure, Success}
 import scala.util.control.NonFatal
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -127,14 +128,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
       }
     }
-
-    private val tasksCache = new PathChildrenCache(client, Tasks, true)
-    tasksCache.getListenable.addListener(new PathChildrenCacheListener {
-      override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
-        handleChildEvent(client, event, "task", addTaskButton, AddTaskText, taskNumber)
-      }
-    })
-    tasksCache.start()
+    val rand = new Random(System.currentTimeMillis)
 
     private val workersCache = new PathChildrenCache(client, Workers, true)
     workersCache.getListenable.addListener(new PathChildrenCacheListener {
@@ -176,18 +170,19 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       }
     }
 
-    addTaskButton.clicks.map { _ =>
-      val nextNumber = taskNumber.incrementAndGet() // TODO maybe this can be incremented when a worker is shown to have started?
-      val path = s"$Tasks/task-$nextNumber"
-      createPath(client, "task", path, nextNumber)
-    }.concat.observeOn(swingScheduler).subscribe { response => response match {
-      case Success(results) =>
-        val (result, number) = results
-        log.info(s"results [${results}]. [$result] [$number]")
-        addTaskButton.text = s"$AddTaskText-$number"
-        appendResults(s"[$result] created.")
-      case Failure(t) => log.info(s"t [${t}]")
-    }
+    addTaskButton.reactions += {
+      case ButtonClicked(_) =>
+        val nextNumber = taskNumber.incrementAndGet()
+        val workersList = workersCache.getCurrentData
+
+
+        // TODO use some sort of load balancing
+        // http://doc.akka.io/docs/akka/snapshot/scala/routing.html
+
+        if (!workersList.isEmpty) {
+          val designatedWorker = new String(workersList.get(rand.nextInt(workersList.size)).getData)
+          system.actorSelection(designatedWorker) ! TaskRequest(nextNumber)
+        }
 
     }
 

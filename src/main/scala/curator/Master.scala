@@ -147,7 +147,7 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
       event.getType match {
         case CHILD_ADDED =>
           try {
-            assignTask(event.getData.getPath.replaceFirst(s"$Tasks/", ""), event.getData.getData, initialTaskAssignmentCallback, doNothing)
+//            assignTask(event.getData.getPath.replaceFirst(s"$Tasks/", ""), event.getData.getData, initialTaskAssignmentCallback, doNothing)
           } catch {
             case e: Exception => log.error("Exception when assigning task.", e) // THIS happens when NOT in background.
           }
@@ -261,49 +261,7 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
 
   def createAssignment(path: String, data: Array[Byte], callback: BackgroundCallback) = {
     log.info(s"createAssignment [${path}] [${new String(data)}]")
-    /*
-      * The default ACL is ZooDefs.Ids#OPEN_ACL_UNSAFE
-      */
-    //NOTE the inBackground can take args, different callbacks or even an executor.
-    //    client.create.withMode(CreateMode.PERSISTENT).inBackground.forPath(path, data)
-    //    client.create.forPath(path, data) //TODO see if this works any better. It is but throws exception, think need parents, see below
-    /*
-    2015-05-27 16:57:57,013 [myid:] - ERROR [PathChildrenCache-1:Master$$anon$1@119] - Exception when assigning task.
-org.apache.zookeeper.KeeperException$NoNodeException: KeeperErrorCode = NoNode for /assign/worker-1/task-1
-	at org.apache.zookeeper.KeeperException.create(KeeperException.java:111)
-	at org.apache.zookeeper.KeeperException.create(KeeperException.java:51)
-	at org.apache.zookeeper.ZooKeeper.create(ZooKeeper.java:783)
-	at org.apache.curator.framework.imps.CreateBuilderImpl$10.call(CreateBuilderImpl.java:626)
-	at org.apache.curator.framework.imps.CreateBuilderImpl$10.call(CreateBuilderImpl.java:610)
-	at org.apache.curator.RetryLoop.callWithRetry(RetryLoop.java:107)
-	at org.apache.curator.framework.imps.CreateBuilderImpl.pathInForeground(CreateBuilderImpl.java:606)
-	at org.apache.curator.framework.imps.CreateBuilderImpl.forPath(CreateBuilderImpl.java:429)
-	at org.apache.curator.framework.imps.CreateBuilderImpl.forPath(CreateBuilderImpl.java:42)
-	at curator.Master.createAssignment(Master.scala:207)
-	at curator.Master.assignTask(Master.scala:196)
-	at curator.Master$$anon$1.childEvent(Master.scala:120)
-	at org.apache.curator.framework.recipes.cache.PathChildrenCache$5.apply(PathChildrenCache.java:482)
-	at org.apache.curator.framework.recipes.cache.PathChildrenCache$5.apply(PathChildrenCache.java:476)
-	at org.apache.curator.framework.listen.ListenerContainer$1.run(ListenerContainer.java:92)
-	at com.google.common.util.concurrent.MoreExecutors$SameThreadExecutorService.execute(MoreExecutors.java:293)
-	at org.apache.curator.framework.listen.ListenerContainer.forEach(ListenerContainer.java:83)
-	at org.apache.curator.framework.recipes.cache.PathChildrenCache.callListeners(PathChildrenCache.java:473)
-	at org.apache.curator.framework.recipes.cache.EventOperation.invoke(EventOperation.java:35)
-	at org.apache.curator.framework.recipes.cache.PathChildrenCache$11.run(PathChildrenCache.java:743)
-	at java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:511)
-	at java.util.concurrent.FutureTask.run(FutureTask.java:266)
-	at java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:511)
-	at java.util.concurrent.FutureTask.run(FutureTask.java:266)
-	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1142)
-	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:617)
-	at java.lang.Thread.run(Thread.java:745)
 
-
-     */
-
-    //    client.create.creatingParentsIfNeeded.forPath(path, data) //TODO see why don't get exception when done in background
-
-    // this does throw an exception
     client.create.creatingParentsIfNeeded.withMode(CreateMode.PERSISTENT).inBackground(callback).forPath(path, data)
   }
 
