@@ -64,9 +64,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
     val addTaskButton = new Button {      text = AddTaskText    }
     val addWorkerButton = new Button {     text = AddWorkerText    }
-    val deleteTasksButton = new Button {      text = "Delete Tasks"    }
     val deleteWorkersButton = new Button {      text = "Delete Workers"    }
-    val deleteAssignmentsButton = new Button {      text = "Delete Assignments"    }
     val resultsFields = new TextArea
     val scrollPane = new ScrollPane(resultsFields)
 
@@ -77,9 +75,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       layout(new BorderPanel {
         layout(addTaskButton) = West
         layout(addWorkerButton) = East
-        layout(deleteTasksButton) = South
         layout(deleteWorkersButton) = North
-        layout(deleteAssignmentsButton) = Center
 
       }) = North
       layout(scrollPane) = Center
@@ -147,10 +143,8 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     })
     workersCache.start()
 
-    val deleteTasks = ButtonTask(deleteTasksButton, Tasks)
     val deleteWorkers = ButtonTask(deleteWorkersButton, Workers)
 
-    wireDeleteButton(deleteTasks)
     wireDeleteButton(deleteWorkers)
 
     def wireDeleteButton(b: ButtonTask) = {
@@ -215,66 +209,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       }).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
     }
 
-    deleteAssignmentsButton.clicks.map(_ => deleteAssignmentsObs).concat.observeOn(swingScheduler).subscribe {
-      response =>  response match {
 
-          case Success(results) =>
-            appendResults(s"Finished")
-            log.info(s"Finished")
-
-            for (result <- results) {
-              log.info(s"result [${result.getForPath}] [${result.getType}] deleted")
-              appendResults(result.getForPath)
-            }
-          case Failure(f) =>
-            val message = s"Delete failed [${f.getMessage}]"
-            log.warn(message, f)
-            appendResults(message)
-        }
-    }
-
-    def deleteAssignmentsObs: Observable[Try[List[CuratorTransactionResult]]] = {
-      Observable.from(deleteAssignments()).timeout(1.seconds).onErrorResumeNext(t => Observable.items(Failure(t)))
-    }
-
-    def deleteAssignments(): Future[Try[List[CuratorTransactionResult]]] = {
-      Future {
-        Try {
-          val transaction = client.inTransaction()
-          val workers = client.getChildren.forPath(Assign).asScala
-          log.info(s"workers [${workers}]")
-
-          for {
-            worker <- workers
-            path = s"$Assign/$worker"
-          } {
-            deleteChildren(path)
-            log.info(s"deleting worker [$path]")
-            if (path == "/assign/worker-5") {
-              throw new Exception("Hopefully fail transaction")
-            }
-            delete(path, transaction)
-          }
-
-          def deleteChildren(worker: String) = {
-            log.info(s"deleteChildren for  worker [${worker}]")
-            for {
-              task <- client.getChildren.forPath(worker).asScala
-            } {
-              val taskPath = s"$worker/$task"
-              log.info(s"deleting task [$taskPath]")
-              delete(taskPath, transaction)
-            }
-          }
-
-          /**
-           * These results are in the same order as added.
-           */
-          val results: util.Collection[CuratorTransactionResult] = transaction.asInstanceOf[CuratorTransactionFinal].commit()
-          results.asScala.toList // Note doing toList as the Scala impl for an iterator is a stream.
-        }
-      }
-    }
 
     def delete(path: String, transaction: CuratorTransaction): CuratorTransactionFinal = {
       transaction.delete.forPath(path).and()
