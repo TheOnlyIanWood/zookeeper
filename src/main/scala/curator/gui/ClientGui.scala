@@ -5,7 +5,7 @@ import java.text.SimpleDateFormat
 import java.util
 import java.util.Date
 import java.util.concurrent.atomic.AtomicInteger
-import akka.actor.{PoisonPill, Identify, ActorRef, ActorSystem}
+import akka.actor._
 import chapter_03.Logger
 import curator.Master._
 import curator.WorkerActor.{ShutdownGracefully, TaskRequest}
@@ -112,7 +112,8 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
         event.getType match {
           case CHILD_ADDED =>
             log.info(s"ADDED: data [${data}] from event [$event]")
-            system.actorSelection(data) ! "hi"
+            val a: ActorSelection = system.actorSelection(data)
+            a ! "hi"
 
           case CHILD_REMOVED =>
             log.info(s"REMOVED: data [${data}] from event [$event]")
