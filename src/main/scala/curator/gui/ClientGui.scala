@@ -64,7 +64,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
 
     val addTaskButton = new Button {      text = AddTaskText    }
     val addWorkerButton = new Button {     text = AddWorkerText    }
-    val deleteWorkersButton = new Button {      text = "Delete Workers"    }
+    val stopWorkersButton = new Button {      text = "Stop Workers"    }
     val clearUpWorkersButton = new Button {      text = "Clear up Workers"    }
     val resultsFields = new TextArea
     val scrollPane = new ScrollPane(resultsFields)
@@ -76,7 +76,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
       layout(new BorderPanel {
         layout(addTaskButton) = West
         layout(addWorkerButton) = East
-        layout(deleteWorkersButton) = North
+        layout(stopWorkersButton) = North
         layout(clearUpWorkersButton) = Center
 
       }) = North
@@ -127,7 +127,7 @@ object ClientGui extends scala.swing.SimpleSwingApplication {
     workersCache.start()
 
 
-    deleteWorkersButton.reactions += {
+    stopWorkersButton.reactions += {
       case ButtonClicked(_) =>
         log.info("delete workers")
         val workersList: List[ChildData] = workersCache.getCurrentData.asScala.toList
