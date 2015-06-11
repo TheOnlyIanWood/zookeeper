@@ -15,7 +15,7 @@ resolvers ++= Seq(
 fork := false
 
 libraryDependencies += "org.apache.zookeeper" % "zookeeper" % "3.4.6"
-libraryDependencies += "org.apache.curator" % "curator-recipes" % "2.1.0-incubating"
+libraryDependencies += "org.apache.curator" % "curator-recipes" % "2.8.0"
 
 
 //copied from Concurrent Book

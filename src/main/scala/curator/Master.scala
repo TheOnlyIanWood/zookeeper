@@ -5,12 +5,13 @@ import java.util
 import java.util.concurrent.CountDownLatch
 
 import chapter_03.Logger
+import curator.WorkerType.{Small, Big}
 import org.apache.curator.RetryPolicy
 import org.apache.curator.framework.api.CuratorEventType._
 import org.apache.curator.framework.api.{BackgroundCallback, CuratorEvent, CuratorListener, UnhandledErrorListener}
-import org.apache.curator.framework.recipes.cache.{PathChildrenCache, PathChildrenCacheEvent, PathChildrenCacheListener}
+import org.apache.curator.framework.recipes.cache._
 import org.apache.curator.framework.recipes.leader.{LeaderSelector, LeaderSelectorListener}
-import org.apache.curator.framework.state.ConnectionState
+import org.apache.curator.framework.state.{ConnectionStateListener, ConnectionState}
 import org.apache.curator.framework.state.ConnectionState._
 import org.apache.curator.framework.{CuratorFramework, CuratorFrameworkFactory}
 import org.apache.curator.retry.ExponentialBackoffRetry
@@ -73,6 +74,7 @@ object Master extends Logger {
 class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
   extends Closeable
   with LeaderSelectorListener
+  with ConnectionStateListener
   with Logger {
 
   import Master._
@@ -83,8 +85,11 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
   // on non fully constructed object as mentioned in the Goetz and Scala CON book
 
   private val client = CuratorFrameworkFactory.newClient(hostPort, retryPolicy)
+  client.getConnectionStateListenable.addListener(this)
   private val leaderSelector = new LeaderSelector(client, "/master", this)
   private val workersCache = new PathChildrenCache(client, Workers, true)
+  private val dummyCache = new PathChildrenCache(client, "/dog/cat/horse", true) //NOTE this creates these nodes if not present.
+  private val workersTreeCache = new TreeCache(client, Workers)
 
   /*
   * We use one latch as barrier for the master selection
@@ -102,7 +107,10 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
     if (true) {
       // temporary switch to allow rerunning of the Master
       client.create.forPath(Workers, new Array[Byte](0))
-      client.create.forPath("/status", new Array[Byte](0))
+
+      for (t <- WorkerType.workerTypes) {
+        client.create.forPath(s"$Workers/$t", new Array[Byte](0))
+      }
     }
   }
 
@@ -130,6 +138,13 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
     workersCache.getListenable.addListener(workersCacheListener)
     workersCache.start()
 
+    dummyCache.start()
+
+    //start workersCache
+    workersTreeCache.getListenable.addListener(workersTreeCacheListener)
+    workersTreeCache.start()
+
+
     /*
      * This latch is to prevent this call from exiting. If we exit, then
      * we release mastership.
@@ -139,7 +154,6 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
 
 
   val rand = new Random(System.currentTimeMillis)
-
 
 
   /*
@@ -180,11 +194,6 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
     }
   }
 
-  private def deletePath(path: String): Unit = {
-    log.info(s"Deleting [$path].")
-    client.delete.inBackground.forPath(path)
-  }
-
   val workersCacheListener = new PathChildrenCacheListener {
     override def childEvent(client: CuratorFramework, event: PathChildrenCacheEvent): Unit = {
 
@@ -193,14 +202,23 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
 
       event.getType match {
         case PathChildrenCacheEvent.Type.CHILD_REMOVED =>
-                    log.info(s"Worker removed.")
+          log.info(s"Worker removed.")
 
         case PathChildrenCacheEvent.Type.CHILD_ADDED => {
-                    log.info(s"New worker added.")
+          log.info(s"New worker added.")
         }
         case PathChildrenCacheEvent.Type.CHILD_UPDATED =>
         case _ => // TODO perhaps handle this.
       }
+
+    }
+  }
+
+  val workersTreeCacheListener = new TreeCacheListener {
+    override def childEvent(client: CuratorFramework, event: TreeCacheEvent): Unit = {
+
+      val path = event.getData.getPath
+      log.info(s"path [${path}] type [${event.getType}]")
 
     }
   }
@@ -233,3 +251,4 @@ class Master(myId: String, hostPort: String, retryPolicy: RetryPolicy)
     }
   }
 }
+
